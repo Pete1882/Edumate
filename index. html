@@ -1,1 +1,213 @@
 TimeVault" - AI-Powered Personal Legacy & Future Communication Platform
+
+
+timevault/
+├── app.py
+├── templates/
+│   └── index.html
+├── static/
+│   └── main.js
+└── requirements.txt
+Flask==2.2.5
+openai==0.27.0
+python-dotenv==1.0.0
+OPENAI_API_KEY=your_openai_api_key_here
+import os
+from flask import Flask, render_template, request, jsonify
+from dotenv import load_dotenv
+import openai
+
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+app = Flask(__name__)
+
+# In-memory storage for demo; a list of dicts
+timevault_data = {
+    "future_letters": [],  # letters to future self
+    "legacy_messages": []  # messages for legacy
+}
+
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+@app.route("/api/send", methods=["POST"])
+def send_message():
+    """
+    Handles sending either a future-letter or legacy message.
+    Also can ask GPT for reflection/advice.
+    Request payload:
+      {
+        "type": "future" or "legacy" or "advice",
+        "message": "text"
+      }
+    """
+    data = request.json
+    msg_type = data.get("type")
+    message = data.get("message", "").strip()
+    if not message:
+        return jsonify({"error": "Message is empty"}), 400
+
+    # If user wants AI advice / reflection
+    if msg_type == "advice":
+        # Ask OpenAI GPT
+        try:
+            resp = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",  # or other
+                messages=[
+                    {"role": "system", "content": "You are a wise personal future self advisor."},
+                    {"role": "user", "content": message}
+                ],
+                max_tokens=200
+            )
+            advice = resp["choices"][0]["message"]["content"]
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+
+        return jsonify({"advice": advice})
+
+    # Otherwise, store the message
+    if msg_type == "future":
+        timevault_data["future_letters"].append(message)
+    elif msg_type == "legacy":
+        timevault_data["legacy_messages"].append(message)
+    else:
+        return jsonify({"error": "Invalid type"}), 400
+
+    return jsonify({"status": "ok", "stored": message})
+
+@app.route("/api/get", methods=["GET"])
+def get_messages():
+    """
+    Get all stored messages.
+    Returns both future letters and legacy messages.
+    """
+    return jsonify(timevault_data)
+
+if __name__ == "__main__":
+    app.run(debug=True)
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>TimeVault</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; }
+    textarea { width: 100%; height: 100px; }
+    button { padding: 10px 20px; margin-top: 10px; }
+    .section { margin-bottom: 30px; }
+    .messages { margin-top: 20px; }
+    .message { border: 1px solid #ccc; padding: 10px; margin-bottom: 5px; }
+  </style>
+</head>
+<body>
+  <h1>TimeVault</h1>
+
+  <div class="section">
+    <h2>Write to Your Future Self</h2>
+    <textarea id="future-input" placeholder="Write a letter to your future self..."></textarea><br />
+    <button onclick="send('future')">Save Future Letter</button>
+  </div>
+
+  <div class="section">
+    <h2>Legacy Message</h2>
+    <textarea id="legacy-input" placeholder="Write a message for your legacy..."></textarea><br />
+    <button onclick="send('legacy')">Save Legacy Message</button>
+  </div>
+
+  <div class="section">
+    <h2>Ask for Advice / Reflection</h2>
+    <textarea id="advice-input" placeholder="Ask yourself (or your future self) for advice..."></textarea><br />
+    <button onclick="askAdvice()">Get Advice</button>
+    <div id="advice-output" style="margin-top:20px; white-space: pre-wrap;"></div>
+  </div>
+
+  <div class="section">
+    <h2>Your Saved Messages</h2>
+    <button onclick="loadMessages()">Load Messages</button>
+    <div id="messages" class="messages"></div>
+  </div>
+
+  <script src="/static/main.js"></script>
+</body>
+</html>
+async function send(type) {
+  const input = document.getElementById(type + "-input");
+  const message = input.value;
+  if (!message) {
+    alert("Please write something first.");
+    return;
+  }
+
+  const resp = await fetch("/api/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type, message })
+  });
+
+  const data = await resp.json();
+  if (data.error) {
+    alert("Error: " + data.error);
+  } else {
+    alert("Saved: " + data.stored);
+    input.value = "";
+  }
+}
+
+async function askAdvice() {
+  const input = document.getElementById("advice-input");
+  const message = input.value;
+  if (!message) {
+    alert("Please write something first.");
+    return;
+  }
+
+  const resp = await fetch("/api/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "advice", message })
+  });
+
+  const data = await resp.json();
+  if (data.error) {
+    alert("Error: " + data.error);
+  } else {
+    document.getElementById("advice-output").innerText = data.advice;
+  }
+}
+
+async function loadMessages() {
+  const resp = await fetch("/api/get");
+  const data = await resp.json();
+  const container = document.getElementById("messages");
+  container.innerHTML = "";
+
+  if (data.future_letters.length) {
+    const h3 = document.createElement("h3");
+    h3.innerText = "Future Letters";
+    container.appendChild(h3);
+    data.future_letters.forEach(msg => {
+      const div = document.createElement("div");
+      div.className = "message";
+      div.innerText = msg;
+      container.appendChild(div);
+    });
+  }
+
+  if (data.legacy_messages.length) {
+    const h3 = document.createElement("h3");
+    h3.innerText = "Legacy Messages";
+    container.appendChild(h3);
+    data.legacy_messages.forEach(msg => {
+      const div = document.createElement("div");
+      div.className = "message";
+      div.innerText = msg;
+      container.appendChild(div);
+    });
+  }
+
+  if (!data.future_letters.length && !data.legacy_messages.length) {
+    container.innerText = "No messages yet.";
+  }
+}
